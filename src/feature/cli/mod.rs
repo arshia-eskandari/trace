@@ -1,7 +1,45 @@
-pub struct CLI;
+pub struct Cli;
 use crate::feature::string_ext::StringExt;
+use std::convert::TryFrom;
 
-impl CLI {
+#[derive(Debug, Copy, Clone)]
+pub enum CliCommand {
+    Start,
+    Stop,
+    Report,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum CliFlag {
+    DBDirectory,
+    Lockfile,
+    Verbose,
+    Quiet,
+    Help,
+    Version,
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("invalid cli option: {0}")]
+pub struct InvalidCliFlag(String);
+impl TryFrom<&str> for CliFlag {
+    type Error = InvalidCliFlag;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let value: String = value.into();
+        match value.as_str() {
+            "-d" | "--db-dir" => Ok(CliFlag::DBDirectory),
+            "-l" | "--lockfile" => Ok(CliFlag::Lockfile),
+            "-v" | "--verbose" => Ok(CliFlag::Verbose),
+            "-q" | "--quiet" => Ok(CliFlag::Quiet),
+            "-h" | "--help" => Ok(CliFlag::Help),
+            "-V" | "--version" => Ok(CliFlag::Version),
+            _ => Err(InvalidCliFlag(value.to_string())),
+        }
+    }
+}
+
+impl Cli {
     pub fn new() -> Self {
         Self {}
     }
@@ -59,7 +97,7 @@ impl CLI {
         );
         println!(
             "{} {}",
-            "-v, --version".to_string().pad_start(2, None).pad_end_to_length(8, None),
+            "-V, --version".to_string().pad_start(2, None).pad_end_to_length(8, None),
             "Print Version"
         );
     }
