@@ -1,104 +1,77 @@
-pub struct Cli;
-use crate::feature::string_ext::StringExt;
-use std::convert::TryFrom;
+use clap::{ command, Parser, Subcommand };
 
-#[derive(Debug, Copy, Clone)]
-pub enum CliCommand {
+#[derive(Debug, Parser)]
+#[command(name = "track", version = "1.0", about = "Time Tracker Application", arg_required_else_help(true))]
+struct Cli {
+    /// Path to database file
+    #[arg(short, long, global = true)]
+    db_dir: Option<String>,
+
+    /// Path to lockfile
+    #[arg(short, long, global = true)]
+    lockfile: Option<String>,
+
+    /// Increase logging verbosity
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    verbose: u8,
+
+    /// Decrease logging verbosity
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    quiet: u8,
+
+    /// Subcommands for specific actions
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    /// Start tracking time
     Start,
+
+    /// Stop tracking time
     Stop,
+
+    /// Report tracked time for the last 24 hours
     Report,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum CliFlag {
-    DBDirectory,
-    Lockfile,
-    Verbose,
-    Quiet,
-    Help,
-    Version,
-}
+pub fn init() {
+    let cli = Cli::parse();
 
-#[derive(Debug, Clone, thiserror::Error)]
-#[error("invalid cli option: {0}")]
-pub struct InvalidCliFlag(String);
-impl TryFrom<&str> for CliFlag {
-    type Error = InvalidCliFlag;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value: String = value.into();
-        match value.as_str() {
-            "-d" | "--db-dir" => Ok(CliFlag::DBDirectory),
-            "-l" | "--lockfile" => Ok(CliFlag::Lockfile),
-            "-v" | "--verbose" => Ok(CliFlag::Verbose),
-            "-q" | "--quiet" => Ok(CliFlag::Quiet),
-            "-h" | "--help" => Ok(CliFlag::Help),
-            "-V" | "--version" => Ok(CliFlag::Version),
-            _ => Err(InvalidCliFlag(value.to_string())),
-        }
+    match cli.command {
+        Commands::Start => handle_start(cli.db_dir, cli.lockfile, cli.verbose, cli.quiet),
+        Commands::Stop => handle_stop(cli.db_dir, cli.lockfile, cli.verbose, cli.quiet),
+        Commands::Report => handle_report(cli.db_dir, cli.lockfile, cli.verbose, cli.quiet),
     }
 }
 
-impl Cli {
-    pub fn new() -> Self {
-        Self {}
-    }
+fn handle_start(db_dir: Option<String>, lockfile: Option<String>, verbose: u8, quiet: u8) {
+    println!(
+        "Stating with {}, {}, {}, and {}",
+        db_dir.unwrap_or("no db".to_string()),
+        lockfile.unwrap_or("no lockfile".to_string()),
+        verbose,
+        quiet
+    )
+}
 
-    pub fn display_menu(&self) {
-        println!("Usage: track [OPTIONS] <COMMAND>");
-        println!("");
-        println!("Commands:");
-        println!(
-            "{} {}",
-            "start".to_string().pad_start(2, None).pad_end_to_length(8, None),
-            "Start tracking time"
-        );
-        println!(
-            "{} {}",
-            "stop".to_string().pad_start(2, None).pad_end_to_length(8, None),
-            "Stop tracking time"
-        );
-        println!(
-            "{} {}",
-            "report".to_string().pad_start(2, None).pad_end_to_length(8, None),
-            "Report tracked time for the last 24 hours"
-        );
-        println!(
-            "{} {}",
-            "help".to_string().pad_start(2, None).pad_end_to_length(8, None),
-            "Print this message or the help of the given subcommand(s)"
-        );
-        println!("");
-        println!("Options");
-        println!(
-            "{} {}",
-            "-d, --db-dir <DB_DIR>".to_string().pad_start(2, None).pad_end_to_length(8, None),
-            "Path to database file"
-        );
-        println!(
-            "{} {}",
-            "-l, --lockfile <LOCKFILE>".to_string().pad_start(2, None).pad_end_to_length(8, None),
-            "Path to lockfile"
-        );
-        println!(
-            "{} {}",
-            "-v, --verbose...".to_string().pad_start(2, None).pad_end_to_length(8, None),
-            "Increase logging verbosity"
-        );
-        println!(
-            "{} {}",
-            "-q, --quite...".to_string().pad_start(2, None).pad_end_to_length(8, None),
-            "Decrease logging verbosity"
-        );
-        println!(
-            "{} {}",
-            "-h, --help".to_string().pad_start(2, None).pad_end_to_length(8, None),
-            "Print help"
-        );
-        println!(
-            "{} {}",
-            "-V, --version".to_string().pad_start(2, None).pad_end_to_length(8, None),
-            "Print Version"
-        );
-    }
+fn handle_stop(db_dir: Option<String>, lockfile: Option<String>, verbose: u8, quiet: u8) {
+    println!(
+        "Stoping with {}, {}, {}, and {}",
+        db_dir.unwrap_or("no db".to_string()),
+        lockfile.unwrap_or("no lockfile".to_string()),
+        verbose,
+        quiet
+    )
+}
+
+fn handle_report(db_dir: Option<String>, lockfile: Option<String>, verbose: u8, quiet: u8) {
+    println!(
+        "Reporting with {}, {}, {}, and {}",
+        db_dir.unwrap_or("no db".to_string()),
+        lockfile.unwrap_or("no lockfile".to_string()),
+        verbose,
+        quiet
+    )
 }
