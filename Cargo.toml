@@ -13,3 +13,9 @@ thiserror = "2.0.3"
 tracing-error = "0.2.0"
 tracing-log = "0.2.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+
+[dev-dependencies]
+assert_cmd = { version = "=2.0.16", features = ["color-auto"] }
+assert_fs = { version = "=1.1.2", features = ["color-auto"] }
+pretty_assertions = "1.4.1"
+testresult = "0.4.1"
