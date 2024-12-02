@@ -1,12 +1,48 @@
-use std::{ fs::OpenOptions, path::{ Path, PathBuf } };
+use std::{ fs::{ self, File, OpenOptions }, io::{ Seek, SeekFrom }, path::{ Path, PathBuf } };
 use fs2::FileExt;
-use serde_json::json;
-use std::io::{Read, Write};
+use serde::{ Deserialize, Serialize };
+use thiserror::Error;
+use std::io::{ Read, Write };
 use chrono::Local;
+use serde_json;
+use error_stack::Report;
 
-struct FlatFileTracker {
+#[derive(Error, Debug)]
+pub enum FlatFileError {
+    #[error("timer is already running")]
+    ActiveTimer,
+
+    #[error("timer is not running")]
+    InactiveTimer,
+
+    #[error("failed to create or open the lock file: {0}")] LockFileError(#[source] std::io::Error),
+
+    #[error("failed to create or open the database file: {0}")] DbFileError(
+        #[source] std::io::Error,
+    ),
+
+    #[error("failed to read from the database file: {0}")] ReadError(#[source] std::io::Error),
+
+    #[error("failed to write to the database file: {0}")] WriteError(#[source] std::io::Error),
+
+    #[error("failed to parse JSON data: {0}")] JsonParseError(#[source] serde_json::Error),
+
+    #[error("failed to serialize data to JSON: {0}")] JsonSerializeError(
+        #[source] serde_json::Error,
+    ),
+}
+pub struct FlatFileTracker {
     db_dir: PathBuf,
     lockfile: PathBuf,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct Timestamp(u64, Option<u64>, bool);
+
+impl Timestamp {
+    fn new(timstamp: u64, is_active: bool) -> Self {
+        Self(timstamp, None, is_active)
+    }
 }
 
 impl FlatFileTracker {
@@ -16,47 +52,118 @@ impl FlatFileTracker {
         Self { db_dir, lockfile }
     }
 
-    pub fn start(&self) -> Result<(), String> {
-        if Path::new(&self.lockfile).exists() {
-            return Err("The timer must be stopped before initiation".to_owned());
-        }
+    fn save_file(db_file: File) -> Result<(), Report<FlatFileError>> {
+        Ok(())
+    }
 
-        let lockfile = OpenOptions::new()
+    pub fn start(&self) -> Result<(), Report<FlatFileError>> {
+        if self.is_running() {
+            return Err(
+                Report::new(FlatFileError::ActiveTimer).attach_printable(
+                    "a timer is already running"
+                )
+            );
+        }
+        OpenOptions::new()
             .write(true)
             .create(true)
             .open(&self.lockfile)
-            .expect("Failed to create or open the lock file");
-        lockfile.lock_exclusive().expect("Failed to acquire lockfile");
+            .map_err(|e|
+                Report::new(FlatFileError::ReadError(e)).attach_printable("failed to open lockfile")
+            )?
+            .lock_exclusive()
+            .map_err(|e|
+                Report::new(FlatFileError::ReadError(e)).attach_printable(
+                    "failed to acquire exclusive lock"
+                )
+            )?;
 
         let now = Local::now();
-        let timestamp = now.timestamp();
+        let timestamp = Timestamp::new(now.timestamp() as u64, true);
 
         let mut db_file = OpenOptions::new()
             .write(true)
             .create(true)
-            .read(true) // Add read permission to read existing content
+            .read(true)
             .open(&self.db_dir)
-            .expect("Failed to create or open the JSON file");
+            .map_err(|e|
+                Report::new(FlatFileError::DbFileError(e)).attach_printable(
+                    "failed to open db file"
+                )
+            )?;
 
-        let mut buffer= String::new();
-        db_file.read_to_string(&mut buffer).expect("Failed to read the JSON file");
+        let mut buffer = String::new();
+        db_file.read_to_string(&mut buffer).map_err(|e| Report::new(FlatFileError::ReadError(e)))?;
 
-        let mut data = if buffer.trim().is_empty() {
-            json!({})
+        let data: Vec<Timestamp> = if buffer.trim().is_empty() {
+            vec![timestamp]
         } else {
-            serde_json::from_str(&buffer).expect("Failed to parse the JSON file")
+            let mut parsed_data: Vec<Timestamp> = serde_json
+                ::from_str(&buffer)
+                .map_err(|e| Report::new(FlatFileError::JsonParseError(e)))?;
+            let last_index = parsed_data.len() - 1;
+            let last_active_option = parsed_data.get_mut(last_index);
+            if let Some(last_active_timestamp) = last_active_option {
+                last_active_timestamp.2 = false;
+            }
+            parsed_data.push(timestamp);
+            parsed_data
         };
 
-        data["timestamp"] = json!(timestamp);
+        db_file
+            .set_len(0)
+            .map_err(|e|
+                Report::new(FlatFileError::DbFileError(e)).attach_printable(
+                    "failed to truncate the file"
+                )
+            )?;
+        db_file
+            .seek(SeekFrom::Start(0))
+            .map_err(|e|
+                Report::new(FlatFileError::DbFileError(e)).attach_printable(
+                    "failed to find the first line"
+                )
+            )?;
 
-        db_file.set_len(0).expect("Failed to truncate the JSON file"); // Clear file contents
-        db_file.write_all(data.to_string().as_bytes()).expect("Failed to write to the JSON file");
+        let json_data = serde_json
+            ::to_string(&data)
+            .map_err(|e|
+                Report::new(FlatFileError::JsonParseError(e)).attach_printable(
+                    "failed to serialize data to JSON"
+                )
+            )?;
+        db_file
+            .write_all(json_data.as_bytes())
+            .map_err(|e|
+                Report::new(FlatFileError::WriteError(e)).attach_printable(
+                    "failed to write to database"
+                )
+            )?;
+
+        Ok(())
+    }
+
+    pub fn stop(&self) -> Result<(), Report<FlatFileError>> {
+        if !self.is_running() {
+            return Err(
+                Report::new(FlatFileError::InactiveTimer).attach_printable("timer is not running")
+            );
+        }
+
+        fs
+            ::remove_file(&self.lockfile)
+            .map_err(|e|
+                Report::new(FlatFileError::LockFileError(e)).attach_printable(
+                    "failed to delete lockfile"
+                )
+            )?;
+        
 
         Ok(())
     }
 
     pub fn is_running(&self) -> bool {
-        true
+        if Path::new(&self.lockfile).exists() { true } else { false }
     }
 }
 
@@ -66,7 +173,7 @@ mod tests {
 
     #[test]
     fn start_tracking_with_default_tracker() {
-        let tracker = FlatFileTracker::new("db.json", "lockfile");
+        let tracker = FlatFileTracker::new("test_db.json", "test_lockfile");
 
         tracker.start();
 
