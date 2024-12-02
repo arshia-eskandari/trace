@@ -52,10 +52,6 @@ impl FlatFileTracker {
         Self { db_dir, lockfile }
     }
 
-    fn save_file(db_file: File) -> Result<(), Report<FlatFileError>> {
-        Ok(())
-    }
-
     pub fn start(&self) -> Result<(), Report<FlatFileError>> {
         if self.is_running() {
             return Err(
@@ -110,6 +106,33 @@ impl FlatFileTracker {
             parsed_data
         };
 
+        self.save_file(&mut db_file, data)?;
+
+        Ok(())
+    }
+
+    pub fn stop(&self) -> Result<(), Report<FlatFileError>> {
+        if !self.is_running() {
+            return Err(
+                Report::new(FlatFileError::InactiveTimer).attach_printable("timer is not running")
+            );
+        }
+
+        fs
+            ::remove_file(&self.lockfile)
+            .map_err(|e|
+                Report::new(FlatFileError::LockFileError(e)).attach_printable(
+                    "failed to delete lockfile"
+                )
+            )?;
+
+        
+        
+
+        Ok(())
+    }
+
+    fn save_file(&self, db_file: &mut File, data: Vec<Timestamp>) -> Result<(), Report<FlatFileError>> {
         db_file
             .set_len(0)
             .map_err(|e|
@@ -139,26 +162,6 @@ impl FlatFileTracker {
                     "failed to write to database"
                 )
             )?;
-
-        Ok(())
-    }
-
-    pub fn stop(&self) -> Result<(), Report<FlatFileError>> {
-        if !self.is_running() {
-            return Err(
-                Report::new(FlatFileError::InactiveTimer).attach_printable("timer is not running")
-            );
-        }
-
-        fs
-            ::remove_file(&self.lockfile)
-            .map_err(|e|
-                Report::new(FlatFileError::LockFileError(e)).attach_printable(
-                    "failed to delete lockfile"
-                )
-            )?;
-        
-
         Ok(())
     }
 
@@ -169,14 +172,27 @@ impl FlatFileTracker {
 
 #[cfg(test)]
 mod tests {
+    use std::{thread, time::Duration};
+
     use super::*;
 
     #[test]
-    fn start_tracking_with_default_tracker() {
+    fn start_tracking_with_default_tracker() -> Result<(), Report<FlatFileError>> {
         let tracker = FlatFileTracker::new("test_db.json", "test_lockfile");
-
-        tracker.start();
-
+        tracker.start()?;
         assert!(tracker.is_running());
+
+        Ok(())
+    }
+
+    #[test]
+    fn stop_tracking_with_default_tracker() -> Result<(), Report<FlatFileError>> {
+        let tracker = FlatFileTracker::new("test_db.json", "test_lockfile");
+        tracker.start()?;
+        thread::sleep(Duration::from_secs(2));
+        tracker.stop()?;
+        assert!(!tracker.is_running());
+
+        Ok(())
     }
 }
