@@ -126,13 +126,14 @@ impl FlatFileTracker {
                 )
             )?;
 
-        
-        
-
         Ok(())
     }
 
-    fn save_file(&self, db_file: &mut File, data: Vec<Timestamp>) -> Result<(), Report<FlatFileError>> {
+    fn save_file(
+        &self,
+        db_file: &mut File,
+        data: Vec<Timestamp>
+    ) -> Result<(), Report<FlatFileError>> {
         db_file
             .set_len(0)
             .map_err(|e|
@@ -172,8 +173,8 @@ impl FlatFileTracker {
 
 #[cfg(test)]
 mod tests {
-    use std::{thread, time::Duration};
-
+    use core::panic;
+    use std::{ thread, time::Duration };
     use super::*;
 
     #[test]
@@ -186,6 +187,35 @@ mod tests {
     }
 
     #[test]
+    fn cannot_start_tracking_while_tracker_is_running() {
+        let tracker = FlatFileTracker::new("test_db.json", "test_lockfile");
+        let first_try = tracker.start();
+
+        match first_try {
+            Ok(_) => {},
+            _ => panic!("failed to run the timer in the first time"),
+        }
+
+        let second_try = tracker.start();
+        let error = second_try.unwrap_err();
+
+        let flat_file_error = error
+            .downcast_ref::<FlatFileError>()
+            .expect("expected a FlatFileError, but got a different error type");
+
+        match flat_file_error {
+            FlatFileError::ActiveTimer => {}
+            _ => panic!("expected FlatFileError::InactiveTimer, but got {:?}", flat_file_error),
+        }
+
+        let display_message = format!("{error}");
+        assert!(
+            display_message.contains("a timer is already running"),
+            "expected the error to contain 'timer is not running', but got: {display_message}"
+        );
+    }
+
+    #[test]
     fn stop_tracking_with_default_tracker() -> Result<(), Report<FlatFileError>> {
         let tracker = FlatFileTracker::new("test_db.json", "test_lockfile");
         tracker.start()?;
@@ -194,5 +224,30 @@ mod tests {
         assert!(!tracker.is_running());
 
         Ok(())
+    }
+
+    #[test]
+    fn cannot_stop_tracking_without_initiation() {
+        let tracker = FlatFileTracker::new("test_db.json", "test_lockfile");
+        let result = tracker.stop();
+
+        assert!(result.is_err());
+
+        let error = result.unwrap_err();
+
+        let flat_file_error = error
+            .downcast_ref::<FlatFileError>()
+            .expect("expected a FlatFileError, but got a different error type");
+
+        match flat_file_error {
+            FlatFileError::InactiveTimer => {}
+            _ => panic!("expected FlatFileError::InactiveTimer, but got {:?}", flat_file_error),
+        }
+
+        let display_message = format!("{error}");
+        assert!(
+            display_message.contains("timer is not running"),
+            "expected the error to contain 'timer is not running', but got: {display_message}"
+        );
     }
 }
