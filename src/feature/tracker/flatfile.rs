@@ -170,16 +170,32 @@ impl FlatFileTracker {
         if Path::new(&self.lockfile).exists() { true } else { false }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use core::panic;
     use std::{ thread, time::Duration };
     use super::*;
+    const DB_DIR: &str = "test_db.json";
+    const LOCKFILE: &str = "test_lockfile";
+
+    fn clear_db_and_lockfile() {
+        if let Err(e) = fs::remove_file(DB_DIR) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("Failed to remove DB file: {}", e);
+            }
+        }
+
+        if let Err(e) = fs::remove_file(LOCKFILE) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("Failed to remove lock file: {}", e);
+            }
+        }
+    }
 
     #[test]
     fn start_tracking_with_default_tracker() -> Result<(), Report<FlatFileError>> {
-        let tracker = FlatFileTracker::new("test_db.json", "test_lockfile");
+        clear_db_and_lockfile();
+        let tracker = FlatFileTracker::new(DB_DIR, LOCKFILE);
         tracker.start()?;
         assert!(tracker.is_running());
 
@@ -188,11 +204,12 @@ mod tests {
 
     #[test]
     fn cannot_start_tracking_while_tracker_is_running() {
-        let tracker = FlatFileTracker::new("test_db.json", "test_lockfile");
+        clear_db_and_lockfile();
+        let tracker = FlatFileTracker::new(DB_DIR, LOCKFILE);
         let first_try = tracker.start();
 
         match first_try {
-            Ok(_) => {},
+            Ok(_) => {}
             _ => panic!("failed to run the timer in the first time"),
         }
 
@@ -217,7 +234,8 @@ mod tests {
 
     #[test]
     fn stop_tracking_with_default_tracker() -> Result<(), Report<FlatFileError>> {
-        let tracker = FlatFileTracker::new("test_db.json", "test_lockfile");
+        clear_db_and_lockfile();
+        let tracker = FlatFileTracker::new(DB_DIR, LOCKFILE);
         tracker.start()?;
         thread::sleep(Duration::from_secs(2));
         tracker.stop()?;
@@ -228,7 +246,8 @@ mod tests {
 
     #[test]
     fn cannot_stop_tracking_without_initiation() {
-        let tracker = FlatFileTracker::new("test_db.json", "test_lockfile");
+        clear_db_and_lockfile();
+        let tracker = FlatFileTracker::new(DB_DIR, LOCKFILE);
         let result = tracker.stop();
 
         assert!(result.is_err());
