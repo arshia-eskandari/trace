@@ -118,6 +118,29 @@ impl FlatFileTracker {
             );
         }
 
+        let lockfile = OpenOptions::new()
+            .write(true)
+            .open(&self.lockfile)
+            .map_err(|e| {
+                Report::new(FlatFileError::LockFileError(e)).attach_printable(
+                    "failed to open lockfile"
+                )
+            })?;
+        
+        lockfile.try_lock_exclusive()
+            .map_err(|e| {
+                Report::new(FlatFileError::LockFileError(e)).attach_printable(
+                    "failed to unlock the lockfile"
+                )
+            })?;
+        
+        lockfile.unlock()
+            .map_err(|e| {
+                Report::new(FlatFileError::LockFileError(e)).attach_printable(
+                    "failed to unlock the lockfile"
+                )
+            })?;
+
         fs
             ::remove_file(&self.lockfile)
             .map_err(|e|
@@ -179,6 +202,12 @@ mod tests {
     const LOCKFILE: &str = "test_lockfile";
 
     fn clear_db_and_lockfile() {
+        if let Ok(lockfile) = OpenOptions::new().write(true).open(LOCKFILE) {
+            if let Err(e) = lockfile.unlock() {
+                eprintln!("Failed to unlock lock file: {}", e);
+            }
+        }
+
         if let Err(e) = fs::remove_file(DB_DIR) {
             if e.kind() != std::io::ErrorKind::NotFound {
                 eprintln!("Failed to remove DB file: {}", e);
@@ -227,8 +256,8 @@ mod tests {
 
         let display_message = format!("{error}");
         assert!(
-            display_message.contains("a timer is already running"),
-            "expected the error to contain 'timer is not running', but got: {display_message}"
+            display_message.contains("timer is already running"),
+            "expected the error to contain 'timer is already running', but got: {display_message}"
         );
     }
 
