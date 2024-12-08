@@ -52,7 +52,7 @@ impl FlatFileTracker {
         Self { db_dir, lockfile }
     }
 
-    pub fn start(&self) -> Result<(), Report<FlatFileError>> {
+    pub fn start(&self, verbosity: i8) -> Result<(), Report<FlatFileError>> {
         if self.is_running() {
             return Err(
                 Report::new(FlatFileError::ActiveTimer).attach_printable(
@@ -60,33 +60,10 @@ impl FlatFileTracker {
                 )
             );
         }
-        OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(&self.lockfile)
-            .map_err(|e|
-                Report::new(FlatFileError::ReadError(e)).attach_printable("failed to open lockfile")
-            )?
-            .lock_exclusive()
-            .map_err(|e|
-                Report::new(FlatFileError::ReadError(e)).attach_printable(
-                    "failed to acquire exclusive lock"
-                )
-            )?;
-
+        self.open_lockfile()?;
         let now = Local::now();
         let timestamp = Timestamp::new(now.timestamp() as u64, true);
-
-        let mut db_file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .read(true)
-            .open(&self.db_dir)
-            .map_err(|e|
-                Report::new(FlatFileError::DbFileError(e)).attach_printable(
-                    "failed to open db file"
-                )
-            )?;
+        let mut db_file = self.open_db()?;
 
         let mut buffer = String::new();
         db_file.read_to_string(&mut buffer).map_err(|e| Report::new(FlatFileError::ReadError(e)))?;
@@ -108,10 +85,20 @@ impl FlatFileTracker {
 
         self.save_file(&mut db_file, data)?;
 
+        match verbosity {
+            v if v <= -1 => {}
+            0 => {
+                println!("Timer started successfully.");
+            }
+            _ => {
+                println!("Timer started at {}.", now.format("%Y-%m-%d %H:%M:%S"));
+            }
+        }
+
         Ok(())
     }
 
-    pub fn stop(&self) -> Result<(), Report<FlatFileError>> {
+    pub fn stop(&self, verbosity: i8) -> Result<(), Report<FlatFileError>> {
         if !self.is_running() {
             return Err(
                 Report::new(FlatFileError::InactiveTimer).attach_printable("timer is not running")
@@ -126,15 +113,17 @@ impl FlatFileTracker {
                     "failed to open lockfile"
                 )
             })?;
-        
-        lockfile.try_lock_exclusive()
+
+        lockfile
+            .try_lock_exclusive()
             .map_err(|e| {
                 Report::new(FlatFileError::LockFileError(e)).attach_printable(
                     "failed to unlock the lockfile"
                 )
             })?;
-        
-        lockfile.unlock()
+
+        lockfile
+            .unlock()
             .map_err(|e| {
                 Report::new(FlatFileError::LockFileError(e)).attach_printable(
                     "failed to unlock the lockfile"
@@ -146,6 +135,89 @@ impl FlatFileTracker {
             .map_err(|e|
                 Report::new(FlatFileError::LockFileError(e)).attach_printable(
                     "failed to delete lockfile"
+                )
+            )?;
+
+        let now = Local::now();
+        let timestamp = now.timestamp() as u64;
+
+        let mut buffer = String::new();
+        let mut db_file = self.open_db()?;
+        db_file.read_to_string(&mut buffer).map_err(|e| Report::new(FlatFileError::ReadError(e)))?;
+
+        let data: Vec<Timestamp> = if buffer.trim().is_empty() {
+            return Err(
+                Report::new(
+                    FlatFileError::DbFileError(
+                        std::io::Error::new(std::io::ErrorKind::InvalidData, "no record found")
+                    )
+                )
+            );
+        } else {
+            let mut parsed_data: Vec<Timestamp> = serde_json
+                ::from_str(&buffer)
+                .map_err(|e| Report::new(FlatFileError::JsonParseError(e)))?;
+
+            if parsed_data.is_empty() {
+                return Err(
+                    Report::new(
+                        FlatFileError::DbFileError(
+                            std::io::Error::new(std::io::ErrorKind::InvalidData, "no record found")
+                        )
+                    )
+                );
+            }
+            let last_index = parsed_data.len() - 1;
+            let last_active_option = parsed_data.get_mut(last_index);
+            if let Some(last_active_timestamp) = last_active_option {
+                last_active_timestamp.1 = Some(timestamp);
+                last_active_timestamp.2 = false;
+            }
+
+            parsed_data
+        };
+
+        self.save_file(&mut db_file, data)?;
+
+        match verbosity {
+            v if v <= -1 => {}
+            0 => {
+                println!("Timer started successfully.");
+            }
+            _ => {
+                println!("Timer stopped at {}.", now.format("%Y-%m-%d %H:%M:%S"));
+            }
+        }
+        Ok(())
+    }
+
+    fn open_db(&self) -> Result<File, Report<FlatFileError>> {
+        let db = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .read(true)
+            .open(&self.db_dir)
+            .map_err(|e|
+                Report::new(FlatFileError::DbFileError(e)).attach_printable(
+                    "failed to open db file"
+                )
+            )?;
+
+        Ok(db)
+    }
+
+    fn open_lockfile(&self) -> Result<(), Report<FlatFileError>> {
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&self.lockfile)
+            .map_err(|e|
+                Report::new(FlatFileError::ReadError(e)).attach_printable("failed to open lockfile")
+            )?
+            .lock_exclusive()
+            .map_err(|e|
+                Report::new(FlatFileError::ReadError(e)).attach_printable(
+                    "failed to acquire exclusive lock"
                 )
             )?;
 
@@ -193,6 +265,7 @@ impl FlatFileTracker {
         if Path::new(&self.lockfile).exists() { true } else { false }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use core::panic;
@@ -225,7 +298,7 @@ mod tests {
     fn start_tracking_with_default_tracker() -> Result<(), Report<FlatFileError>> {
         clear_db_and_lockfile();
         let tracker = FlatFileTracker::new(DB_DIR, LOCKFILE);
-        tracker.start()?;
+        tracker.start(-1)?;
         assert!(tracker.is_running());
 
         Ok(())
@@ -235,14 +308,14 @@ mod tests {
     fn cannot_start_tracking_while_tracker_is_running() {
         clear_db_and_lockfile();
         let tracker = FlatFileTracker::new(DB_DIR, LOCKFILE);
-        let first_try = tracker.start();
+        let first_try = tracker.start(-1);
 
         match first_try {
             Ok(_) => {}
             _ => panic!("failed to run the timer in the first time"),
         }
 
-        let second_try = tracker.start();
+        let second_try = tracker.start(-1);
         let error = second_try.unwrap_err();
 
         let flat_file_error = error
@@ -265,9 +338,9 @@ mod tests {
     fn stop_tracking_with_default_tracker() -> Result<(), Report<FlatFileError>> {
         clear_db_and_lockfile();
         let tracker = FlatFileTracker::new(DB_DIR, LOCKFILE);
-        tracker.start()?;
+        tracker.start(-1)?;
         thread::sleep(Duration::from_secs(2));
-        tracker.stop()?;
+        tracker.stop(-1)?;
         assert!(!tracker.is_running());
 
         Ok(())
@@ -277,7 +350,7 @@ mod tests {
     fn cannot_stop_tracking_without_initiation() {
         clear_db_and_lockfile();
         let tracker = FlatFileTracker::new(DB_DIR, LOCKFILE);
-        let result = tracker.stop();
+        let result = tracker.stop(-1);
 
         assert!(result.is_err());
 
