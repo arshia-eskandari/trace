@@ -1,5 +1,5 @@
 use track::{ error::AppError, init };
-use error_stack::{ Report, Result, ResultExt };
+use error_stack::Result;
 
 fn main() -> Result<(), AppError> {
     init::error_reporting();

@@ -1,7 +1,7 @@
 use clap::{ command, Parser, Subcommand };
 use error_stack::Report;
 
-use super::tracker::flatfile::{ FlatFileError, FlatFileTracker };
+use super::tracker::flatfile::FlatFileTracker;
 
 #[derive(thiserror::Error, Debug)]
 #[error("a cli error occured")]

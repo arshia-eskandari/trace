@@ -2,9 +2,8 @@ use std::{ fs::{ self, File, OpenOptions }, io::{ Seek, SeekFrom }, path::{ Path
 use fs2::FileExt;
 use serde::{ Deserialize, Serialize };
 use thiserror::Error;
-use tracing_subscriber::fmt::format;
 use std::io::{ Read, Write };
-use chrono::{ DateTime, Local, TimeZone, Utc };
+use chrono::{ Local, TimeZone, Utc };
 use serde_json;
 use error_stack::Report;
 
@@ -31,6 +30,8 @@ pub enum FlatFileError {
     #[error("failed to serialize data to JSON: {0}")] JsonSerializeError(
         #[source] serde_json::Error,
     ),
+
+    #[error("something went wrong")] SomethingWentWrong,
 }
 pub struct FlatFileTracker {
     db_dir: PathBuf,
@@ -226,12 +227,17 @@ impl FlatFileTracker {
                             ts.1 != None &&
                             ts.2 != true
                     )
-                    .for_each(|ts|  {
-                        let start = self.format_timestamp(ts.0, verbosity);
-                        let stop_timestamp = ts.1.expect("Expected stop timestamp, but it was None");
-                        let stop = self.format_timestamp(stop_timestamp, verbosity);
-                        println!("started timer at {} and stopped timer at {}", start, stop);
-                    });
+                    .try_for_each(
+                        |ts| -> Result<(), Report<FlatFileError>> {
+                            let start = self.format_timestamp(ts.0, verbosity);
+                            let stop_timestamp = ts.1.ok_or_else(||
+                                Report::new(FlatFileError::SomethingWentWrong)
+                            )?;
+                            let stop = self.format_timestamp(stop_timestamp, verbosity);
+                            println!("started timer at {} and stopped timer at {}", start, stop);
+                            Ok(())
+                        }
+                    )?;
             }
         }
 

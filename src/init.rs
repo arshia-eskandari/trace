@@ -1,6 +1,5 @@
 use error_stack::{ fmt::ColorMode, Report };
 use owo_colors::OwoColorize;
-use tracing_log::AsTrace;
 use tracing_subscriber::EnvFilter;
 pub use crate::feature::cli::init as cli_init;
 
