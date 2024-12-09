@@ -7,7 +7,6 @@ use super::tracker::flatfile::{ FlatFileError, FlatFileTracker };
 #[error("a cli error occured")]
 pub struct CliError;
 
-
 #[derive(Debug, Parser)]
 #[command(
     name = "track",
@@ -53,39 +52,27 @@ pub fn init() -> Result<(), Report<CliError>> {
     let cli = Cli::parse();
     let Cli { db_dir: db_dir_option, lockfile: lock_file_option, verbose, quiet, .. } = cli;
     let db_dir = db_dir_option.unwrap_or("db.json".to_owned());
+    let db_dir = if db_dir.ends_with(".json") { db_dir } else { format!("{}.json", db_dir) };
     let lockfile = lock_file_option.unwrap_or("lockfile".to_owned());
     let tracker = FlatFileTracker::new(&db_dir, &lockfile);
     let verbosity = if quiet > 0 { -1 as i8 } else { verbose as i8 };
     let handle_start = || -> Result<(), Report<CliError>> {
         tracker
             .start(verbosity)
-            .map_err(|e|
-                e.change_context(CliError).attach_printable("tracker failed to start")
-            )?;
-        let verbosity = if quiet > 0 {
-            -1 * quiet as i8
-        } else {
-            verbose as i8
-        };
+            .map_err(|e| e.change_context(CliError).attach_printable("tracker failed to start"))?;
 
         Ok(())
     };
     let handle_stop = || -> Result<(), Report<CliError>> {
         tracker
             .stop(verbosity)
-            .map_err(|e|
-                e.change_context(CliError).attach_printable("tracker failed to stop")
-            )?;
+            .map_err(|e| e.change_context(CliError).attach_printable("tracker failed to stop"))?;
         Ok(())
     };
     let handle_report = || -> Result<(), Report<CliError>> {
-        println!(
-            "Reporting with {}, {}, {}, and {}",
-            db_dir,
-            lockfile,
-            verbose,
-            quiet
-        );
+        tracker
+            .report(verbosity)
+            .map_err(|e| e.change_context(CliError).attach_printable("tracker failed to report"))?;
         Ok(())
     };
     match cli.command {

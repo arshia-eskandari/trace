@@ -2,8 +2,9 @@ use std::{ fs::{ self, File, OpenOptions }, io::{ Seek, SeekFrom }, path::{ Path
 use fs2::FileExt;
 use serde::{ Deserialize, Serialize };
 use thiserror::Error;
+use tracing_subscriber::fmt::format;
 use std::io::{ Read, Write };
-use chrono::Local;
+use chrono::{ DateTime, Local, TimeZone, Utc };
 use serde_json;
 use error_stack::Report;
 
@@ -88,10 +89,10 @@ impl FlatFileTracker {
         match verbosity {
             v if v <= -1 => {}
             0 => {
-                println!("Timer started successfully.");
+                println!("timer started successfully.");
             }
             _ => {
-                println!("Timer started at {}.", now.format("%Y-%m-%d %H:%M:%S"));
+                println!("timer started at {}.", now.format("%Y-%m-%d %H:%M:%S"));
             }
         }
 
@@ -182,13 +183,71 @@ impl FlatFileTracker {
         match verbosity {
             v if v <= -1 => {}
             0 => {
-                println!("Timer started successfully.");
+                println!("timer started successfully.");
             }
             _ => {
-                println!("Timer stopped at {}.", now.format("%Y-%m-%d %H:%M:%S"));
+                println!("timer stopped at {}.", now.format("%Y-%m-%d %H:%M:%S"));
             }
         }
         Ok(())
+    }
+
+    pub fn report(&self, verbosity: i8) -> Result<(), Report<FlatFileError>> {
+        let mut db_file = self.open_db()?;
+        let mut buffer = String::new();
+        db_file.read_to_string(&mut buffer).map_err(|e| Report::new(FlatFileError::ReadError(e)))?;
+
+        let now = Local::now();
+        let timestamp = now.timestamp() as u64;
+        const TWENTY_FOUR_HOURS_IN_MILLISECONDS: u64 = 24 * 60 * 60 * 1000;
+        if buffer.trim().is_empty() {
+            return Err(
+                Report::new(
+                    FlatFileError::ReadError(
+                        std::io::Error::new(
+                            std::io::ErrorKind::UnexpectedEof,
+                            "The database file is empty"
+                        )
+                    )
+                )
+            );
+        } else {
+            let parsed_data: Vec<Timestamp> = serde_json
+                ::from_str(&buffer)
+                .map_err(|e| Report::new(FlatFileError::JsonParseError(e)))?;
+            if parsed_data.len() == 0 {
+                println!("no records found");
+            } else {
+                parsed_data
+                    .into_iter()
+                    .filter(
+                        |ts|
+                            timestamp - ts.0 < TWENTY_FOUR_HOURS_IN_MILLISECONDS &&
+                            ts.1 != None &&
+                            ts.2 != true
+                    )
+                    .for_each(|ts|  {
+                        let start = self.format_timestamp(ts.0, verbosity);
+                        let stop_timestamp = ts.1.expect("Expected stop timestamp, but it was None");
+                        let stop = self.format_timestamp(stop_timestamp, verbosity);
+                        println!("started timer at {} and stopped timer at {}", start, stop);
+                    });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn format_timestamp(&self, timestamp: u64, verbosity: i8) -> String {
+        let utc_datetime = Utc.timestamp_opt(timestamp as i64, 0)
+            .single()
+            .expect("Invalid or ambiguous timestamp");
+
+        let local_datetime = utc_datetime.with_timezone(&Local);
+
+        let format_str = if verbosity >= 1 { "%Y-%m-%d %H:%M:%S" } else { "%Y-%m-%d" };
+
+        local_datetime.format(format_str).to_string()
     }
 
     fn open_db(&self) -> Result<File, Report<FlatFileError>> {
